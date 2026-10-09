@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lab-protocol-0.1.schema.json",
+  "title": "实验步骤文件 lab-protocol-draft 0.1",
+  "description": "结构约束。引用存在性、ID 唯一、偏移递增等语义规则由解析器校验，见 docs/01_需求契约.md §3。",
+  "type": "object",
+  "required": ["format", "format_version", "protocol_id", "protocol_version", "title", "time_unit", "run_start_anchor_id", "anchors", "steps"],
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9_-]{1,64}$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "anchor": {
+      "type": "object",
+      "required": ["id", "label", "create_on"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/text" },
+        "create_on": {
+          "oneOf": [
+            { "type": "object", "required": ["event"], "additionalProperties": false, "properties": { "event": { "const": "run_started" } } },
+            { "type": "object", "required": ["event", "step_id"], "additionalProperties": false, "properties": { "event": { "const": "step_confirmed" }, "step_id": { "$ref": "#/$defs/id" } } },
+            { "type": "object", "required": ["event"], "additionalProperties": false, "properties": { "event": { "const": "manual" } } }
+          ]
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "title", "completion"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/text" },
+        "instruction": { "$ref": "#/$defs/text" },
+        "completion": { "const": "manual_confirmation" },
+        "sampling_plan_ids": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "not_before": {
+          "type": "object",
+          "required": ["anchor_id", "offset"],
+          "additionalProperties": false,
+          "properties": { "anchor_id": { "$ref": "#/$defs/id" }, "offset": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["id", "label", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/text" },
+        "type": { "enum": ["decimal", "integer", "text"] },
+        "unit": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "sampling_plan": {
+      "type": "object",
+      "required": ["id", "label", "anchor_id", "offsets", "capture_mode", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "$ref": "#/$defs/text" },
+        "anchor_id": { "$ref": "#/$defs/id" },
+        "offsets": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "type": "integer", "minimum": 0 } },
+        "capture_mode": { "const": "manual" },
+        "fields": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/field" } }
+      }
+    }
+  },
+  "properties": {
+    "format": { "const": "lab-protocol-draft" },
+    "format_version": { "const": "0.1" },
+    "status": { "enum": ["draft", "released"] },
+    "synthetic": { "type": "boolean" },
+    "protocol_id": { "$ref": "#/$defs/id" },
+    "protocol_version": { "type": "string", "pattern": "^[0-9A-Za-z.+-]{1,32}$" },
+    "title": { "$ref": "#/$defs/text" },
+    "description": { "type": "string", "maxLength": 4000 },
+    "time_unit": { "const": "seconds" },
+    "run_start_anchor_id": { "$ref": "#/$defs/id" },
+    "anchors": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/anchor" } },
+    "steps": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "$ref": "#/$defs/step" } },
+    "sampling_plans": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/sampling_plan" } },
+    "free_observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "step_association": { "enum": ["optional", "none"] },
+        "advances_step": { "const": false }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# 构建产物与本机配置
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+
+# 正式签名密钥与密码——绝不入库，请另行备份
+labrun/keystore/
+*.jks
+*.keystore
+keystore.properties
+
+# 交付的安装包体积大且可由源码重建；校验值与说明文档仍入库
+交付/安卓/*.apk
+交付/电脑/*.msi
+交付/电脑/*.zip
+labrun/dist/

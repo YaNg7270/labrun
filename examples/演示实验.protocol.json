@@ -1,0 +1,33 @@
+{
+  "format": "lab-protocol-draft",
+  "format_version": "0.1",
+  "status": "draft",
+  "synthetic": true,
+  "protocol_id": "demo-dual-t0",
+  "protocol_version": "0.1",
+  "title": "双 T0、周期采样与自由现象演示",
+  "description": "仅供软件需求与验收讨论；纯虚构流程，尚无正式 Schema 或应用解析器。",
+  "time_unit": "seconds",
+  "run_start_anchor_id": "run_start",
+  "anchors": [
+    { "id": "run_start", "label": "实验开始", "create_on": { "event": "run_started" } },
+    { "id": "mix", "label": "模拟混合完成", "create_on": { "event": "step_confirmed", "step_id": "mix_demo" } }
+  ],
+  "steps": [
+    { "id": "prepare", "title": "模拟准备", "instruction": "确认演示数据与测试记录入口可用。", "completion": "manual_confirmation" },
+    { "id": "mix_demo", "title": "模拟混合", "instruction": "确认完成后建立 mix 局部锚点。", "completion": "manual_confirmation" },
+    { "id": "observe", "title": "等待与模拟采样", "instruction": "按局部时间采样；期间可自由记录现象；到点不自动完成步骤。", "completion": "manual_confirmation", "sampling_plan_ids": ["reading_series"] },
+    { "id": "finish", "title": "结束与整理", "instruction": "查看待完成采样，再手工结束实验。", "completion": "manual_confirmation" }
+  ],
+  "sampling_plans": [
+    {
+      "id": "reading_series",
+      "label": "模拟读数序列",
+      "anchor_id": "mix",
+      "offsets": [60, 120, 180],
+      "capture_mode": "manual",
+      "fields": [ { "id": "value", "label": "模拟读数", "type": "decimal", "unit": "a.u." } ]
+    }
+  ],
+  "free_observations": { "enabled": true, "step_association": "optional", "advances_step": false }
+}
