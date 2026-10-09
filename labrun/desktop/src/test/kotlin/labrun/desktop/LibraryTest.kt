@@ -51,6 +51,14 @@ class LibraryTest {
         val again = Library(File(tmp, "lib")).apply { reload() }
         assertEquals(2, again.entries.single().revisions.size)
         assertTrue(again.problems.isEmpty())
+
+        // 删除：先删一个修订，再删整个实验；库里不留目录
+        assertTrue(again.deleteRevision(again.entries.single().revisions.first()))
+        assertEquals(1, again.entries.single().revisions.size)
+        assertTrue(again.deleteRun(again.entries.single().runId))
+        assertTrue(again.entries.isEmpty())
+        assertTrue(File(tmp, "lib").listFiles().orEmpty().isEmpty())
+        assertTrue(snapshot.exists() && final.exists())   // 原始文件不受影响
         tmp.deleteRecursively()
     }
 }

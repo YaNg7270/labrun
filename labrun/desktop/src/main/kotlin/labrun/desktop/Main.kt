@@ -22,7 +22,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -154,7 +156,7 @@ private fun snapshot(args: List<String>) {
     println("快照已写入 ${out.absolutePath}")
 }
 
-const val APP_VERSION = "desktop-1.1.1"
+const val APP_VERSION = "desktop-1.1.2"
 
 val LocalForceDark = staticCompositionLocalOf<Boolean?> { null }
 
@@ -185,7 +187,7 @@ private fun app(args: Array<String>) = application {
     remember { if (args.isNotEmpty()) importFiles(args.map(::File)); 0 }
 
     Window(
-        onCloseRequest = ::exitApplication, title = "实验记录 · 电脑端 1.1.0",
+        onCloseRequest = ::exitApplication, title = "实验记录 · 电脑端 " + APP_VERSION.removePrefix("desktop-"),
         state = rememberWindowState(width = 1280.dp, height = 820.dp),
         onPreviewKeyEvent = { e ->
             when {
@@ -203,12 +205,17 @@ private fun app(args: Array<String>) = application {
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     message?.let { m ->
                         Row(Modifier.fillMaxWidth().background(c.surfaceAlt).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(m, style = T.label, color = if (m.startsWith("导入失败")) c.overdue else c.text, modifier = Modifier.weight(1f))
+                            Text(m, style = T.label, color = if (m.startsWith("导入失败") || m.startsWith("删除失败")) c.overdue else c.text, modifier = Modifier.weight(1f))
                             TextButton(onClick = { message = null }) { Text("关闭") }
                         }
                     }
                     val entry = remember(version, selected) { lib.entries.firstOrNull { it.runId == selected } }
-                    if (entry == null) Empty(lib) else Detail(entry, onMessage = { message = it })
+                    if (entry == null) Empty(lib) else Detail(entry, onMessage = { message = it }, onDelete = { rev ->
+                        val ok = try { if (rev == null) lib.deleteRun(entry.runId) else lib.deleteRevision(rev) } catch (e: Exception) { false }
+                        if (lib.entries.none { it.runId == entry.runId }) selected = null
+                        version++
+                        message = if (ok) (if (rev == null) "已从库中删除：${entry.latest.content.state.protocol.title}" else "已删除该修订") else "删除失败 · 请检查库文件是否被占用"
+                    })
                 }
             }
         }
@@ -305,12 +312,13 @@ private fun Empty(lib: Library) {
 }
 
 @Composable
-private fun Detail(entry: Library.Entry, onMessage: (String) -> Unit, initialTab: Int = 0) {
+private fun Detail(entry: Library.Entry, onMessage: (String) -> Unit, onDelete: (Library.Revision?) -> Unit = {}, initialTab: Int = 0) {
     val c = LocalLab.current
     var revIdx by remember(entry.runId) { mutableIntStateOf(entry.revisions.indexOf(entry.latest)) }
     val rev = entry.revisions[revIdx.coerceIn(0, entry.revisions.lastIndex)]
     val s = rev.content.state
     var tab by remember(entry.runId) { mutableIntStateOf(initialTab) }
+    var deleting by remember(entry.runId) { mutableStateOf(false) }
     val baseName = remember(s) { startText(s).replace(Regex("[- :]"), "") + "_" + s.protocol.title.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_").take(40) }
 
     fun export(ext: String, write: (File) -> Unit) {
@@ -338,7 +346,10 @@ private fun Detail(entry: Library.Entry, onMessage: (String) -> Unit, initialTab
                     OutlinedButton(onClick = { export("measurements.csv") { it.writeText(RunViews(s).measurementsCsv()) } }) { Text("测量表 CSV") }
                     OutlinedButton(onClick = { export("timeline.csv") { it.writeText(RunViews(s).timelineCsv()) } }) { Text("时间线 CSV") }
                 }
-                TextButton(onClick = { runCatching { Desktop.getDesktop().open(rev.file.parentFile) } }) { Text("打开原始包所在文件夹", style = T.caption) }
+                Row {
+                    TextButton(onClick = { runCatching { Desktop.getDesktop().open(rev.file.parentFile) } }) { Text("打开原始包所在文件夹", style = T.caption) }
+                    TextButton(onClick = { deleting = true }) { Text("从库中删除…", style = T.caption, color = c.overdue) }
+                }
             }
         }
         if (entry.revisions.size > 1) {
@@ -353,6 +364,7 @@ private fun Detail(entry: Library.Entry, onMessage: (String) -> Unit, initialTab
                 }
             }
         }
+        if (deleting) DeleteDialog(entry, rev, onDismiss = { deleting = false }) { which -> deleting = false; onDelete(which) }
         Row(Modifier.padding(vertical = 12.dp).background(c.surfaceAlt, RoundedCornerShape(20.dp)).padding(4.dp)) {
             listOf("测量表", "时间线", "现象", "步骤、起点与更正").forEachIndexed { i, t ->
                 Box(Modifier.background(if (i == tab) c.surface else Color.Transparent, RoundedCornerShape(16.dp)).clickable { tab = i }.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -370,6 +382,31 @@ private fun Detail(entry: Library.Entry, onMessage: (String) -> Unit, initialTab
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+/** 删除确认：多修订时可只删当前修订；[onConfirm] 传 null 表示删除整个实验。 */
+@Composable
+private fun DeleteDialog(entry: Library.Entry, rev: Library.Revision, onDismiss: () -> Unit, onConfirm: (Library.Revision?) -> Unit) {
+    val c = LocalLab.current
+    val multi = entry.revisions.size > 1
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("从库中删除“${rev.content.state.protocol.title}”？") },
+        text = {
+            Text((if (multi) "这个实验有 ${entry.revisions.size} 个修订。可以只删除当前查看的修订，或删除整个实验。\n\n" else "") +
+                "删除的是电脑端实验库里保存的导出包副本，无法在程序里恢复；手机上的记录和你当初导入的原始文件不受影响，需要时可以重新导入。",
+                style = T.body)
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (multi) OutlinedButton(onClick = { onConfirm(rev) }) { Text("只删当前修订") }
+                Button(onClick = { onConfirm(null) }, colors = ButtonDefaults.buttonColors(containerColor = c.overdue)) {
+                    Text(if (multi) "删除整个实验" else "删除")
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable

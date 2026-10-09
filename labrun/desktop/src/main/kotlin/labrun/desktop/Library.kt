@@ -64,6 +64,25 @@ class Library(val root: File) {
         return ImportResult.Imported(runId, decision)
     }
 
+    /** 从库中删除整个实验（全部修订）。只删库里的副本，不碰用户当初选择的原始文件。 */
+    fun deleteRun(runId: String): Boolean {
+        val dir = File(root, runId)
+        require(runId.isNotBlank() && dir.canonicalFile.parentFile == root.canonicalFile && dir.isDirectory) { "无效的实验：$runId" }
+        val ok = dir.deleteRecursively()
+        reload()
+        return ok
+    }
+
+    /** 只删除一个修订；删到最后一个时连同实验目录一起移除。 */
+    fun deleteRevision(rev: Revision): Boolean {
+        val dir = rev.file.canonicalFile.parentFile
+        require(dir.parentFile == root.canonicalFile && rev.file.name.endsWith(".labrun.zip")) { "无效的修订：${rev.file}" }
+        val ok = rev.file.delete()
+        if (dir.listFiles().isNullOrEmpty()) dir.delete()
+        reload()
+        return ok
+    }
+
     companion object {
         fun default(): Library {
             System.getenv("LABRUN_LIBRARY")?.takeIf { it.isNotBlank() }?.let { return Library(File(it)) }
