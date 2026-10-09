@@ -1,5 +1,6 @@
 package labrun.android.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,7 +9,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,10 +40,17 @@ fun RunDetailScreen(repo: Repository, runId: String, modifier: Modifier, onBack:
     var editMeasurement by remember { mutableStateOf<Measurement?>(null) }
     var editObs by remember { mutableStateOf<Observation?>(null) }
     var anchorFix by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    val archived = remember(runId, repo.libraryVersion) { repo.storage.isArchived(runId) }
 
     Column(modifier.padding(horizontal = 16.dp)) {
         TextButton(onClick = onBack, modifier = Modifier.padding(top = 8.dp)) { Text("‹ 首页") }
-        if (s == null) { Text("无法读取该实验", color = c.overdue); return@Column }
+        if (s == null) {
+            Text("无法读取该实验", color = c.overdue)
+            OutlinedButton(onClick = { deleting = true }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(56.dp)) { Text("删除…", color = c.overdue) }
+            if (deleting) DeleteRunDialog(repo, runId, null, onDeleted = onBack) { deleting = false }
+            return@Column
+        }
         Text(s.protocol.title, style = LabType.title)
         val ended = s.ended
         Text(
@@ -54,7 +65,14 @@ fun RunDetailScreen(repo: Repository, runId: String, modifier: Modifier, onBack:
             if (s.correctionCount > 0) " · 更正 ${s.correctionCount}" else "",
             style = LabType.body, modifier = Modifier.padding(vertical = 8.dp))
         if (s.timeUncertain) Banner("出现过重启或系统时间变化，部分时间为估算", c.uncertain)
-        Button(onClick = { exporting = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("导出（数据包 / HTML 报告 / Excel）") }
+        Button(onClick = { exporting = true }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("导出（数据包 / HTML 报告 / Excel）") }
+        if (ended != null) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { repo.setArchived(runId, !archived) }, modifier = Modifier.weight(1f).height(56.dp)) {
+                Text(if (archived) "取消归档" else "归档")
+            }
+            OutlinedButton(onClick = { deleting = true }, modifier = Modifier.weight(1f).height(56.dp)) { Text("删除…", color = c.overdue) }
+        }
+        if (archived) Text("已归档：首页“历史实验”中不再显示，可在“已归档”里找到。", style = LabType.caption, color = c.muted, modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(12.dp))
         Tabs(listOf("时间线", "测量表", "现象", "更正"), tab) { tab = it }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
@@ -85,8 +103,32 @@ fun RunDetailScreen(repo: Repository, runId: String, modifier: Modifier, onBack:
     }
     if (s != null) {
         if (exporting) ExportDialog(repo, runId) { exporting = false }
+        if (deleting) DeleteRunDialog(repo, runId, s.protocol.title, onDeleted = onBack, onExport = { deleting = false; exporting = true }) { deleting = false }
         editMeasurement?.let { m -> CorrectMeasurementDialog(repo, s, m) { editMeasurement = null } }
         editObs?.let { o -> CorrectObservationDialog(repo, s, o) { editObs = null } }
         anchorFix?.let { id -> CorrectAnchorDialog(repo, s, id) { anchorFix = null } }
     }
+}
+
+/** 永久删除：先提示导出；删除后回首页。 */
+@Composable
+private fun DeleteRunDialog(repo: Repository, runId: String, title: String?, onDeleted: () -> Unit, onExport: (() -> Unit)? = null, onClose: () -> Unit) {
+    val c = LocalLab.current
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Column { Text("永久删除这次实验？"); RejectionText(repo) } },
+        text = {
+            Column {
+                title?.let { Text(it, style = LabType.body) }
+                Text("将从手机上彻底删除全部记录和照片，无法恢复。需要保留的话请先导出数据包；只是不想在首页看到，可以改用“归档”。",
+                    style = LabType.body, color = c.overdue, modifier = Modifier.padding(top = 8.dp))
+                if (onExport != null) OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(56.dp)) { Text("先导出") }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { if (repo.deleteRun(runId)) { onClose(); onDeleted() } },
+                colors = ButtonDefaults.buttonColors(containerColor = c.overdue), modifier = Modifier.height(56.dp)) { Text("永久删除") }
+        },
+        dismissButton = { TextButton(onClick = onClose, modifier = Modifier.height(56.dp)) { Text("取消") } },
+    )
 }

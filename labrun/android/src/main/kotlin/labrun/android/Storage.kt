@@ -28,9 +28,11 @@ class AndroidClock(private val context: Context) : Clock {
  *   runs/<run_id>/protocol.snapshot.json
  *   runs/<run_id>/events.jsonl       只追加，每行一个事件，写后 fsync
  *   runs/<run_id>/attachments/       照片
+ *   runs/<run_id>/archived           存在即“已归档”（仅本机显示用）
  *   active_run                       进行中运行的 run_id
  */
 class Storage(private val root: File) {
+    private companion object { const val ARCHIVED = "archived" }
     private val protocolsDir = File(root, "protocols").apply { mkdirs() }
     val runsDir = File(root, "runs").apply { mkdirs() }
     private val activeFile = File(root, "active_run")
@@ -109,6 +111,26 @@ class Storage(private val root: File) {
         // 截掉半行，否则后续追加会把它夹在中间
         if (dropped && repair) atomicWrite(File(dir, "events.jsonl"), events.joinToString("") { LabJson.encodeToString(Event.serializer(), it) + "\n" }.toByteArray())
         return LoadedRun(runId, File(dir, "protocol.snapshot.json").readBytes(), events, dropped)
+    }
+
+    /** 归档只是本机的显示标记（运行目录里的 archived 文件），不属于实验记录，也不进导出包。 */
+    fun isArchived(runId: String) = File(runDir(runId), ARCHIVED).exists()
+
+    fun setArchived(runId: String, on: Boolean) {
+        val f = File(checkedRunDir(runId), ARCHIVED)
+        if (on) atomicWrite(f, System.currentTimeMillis().toString().toByteArray()) else f.delete()
+    }
+
+    /** 永久删除一个运行的全部文件（事件、快照、照片）。进行中的运行不能删。 */
+    fun deleteRun(runId: String): Boolean {
+        check(runId != activeRunId) { "进行中的实验不能删除，请先结束" }
+        return checkedRunDir(runId).deleteRecursively()
+    }
+
+    private fun checkedRunDir(runId: String): File {
+        val dir = runDir(runId)
+        require(runId.isNotBlank() && dir.parentFile == runsDir && dir.isDirectory) { "无效的运行：$runId" }
+        return dir
     }
 
     fun listRunIds(): List<String> = runsDir.listFiles { f -> File(f, "events.jsonl").exists() }.orEmpty()

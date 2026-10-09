@@ -199,13 +199,33 @@ class Repository(private val ctx: Context) {
 
     // ---------------------------------------------------------------- 历史与导出
 
-    data class RunSummary(val runId: String, val state: RunState?, val error: String?)
+    data class RunSummary(val runId: String, val state: RunState?, val error: String?, val archived: Boolean)
 
+    /** 按开始时间新→旧（不按目录修改时间：归档标记会改动目录时间）。 */
     fun runs(): List<RunSummary> = storage.listRunIds().map { id ->
+        val archived = storage.isArchived(id)
         try {
             val l = storage.loadRunReadOnly(id)
-            RunSummary(id, RunState.replay(ProtocolParser.parse(l.protocolBytes).protocol!!, l.events), null)
-        } catch (e: Exception) { RunSummary(id, null, e.message) }
+            RunSummary(id, RunState.replay(ProtocolParser.parse(l.protocolBytes).protocol!!, l.events), null, archived)
+        } catch (e: Exception) { RunSummary(id, null, e.message, archived) }
+    }.sortedByDescending { it.state?.start?.wallMs ?: Long.MAX_VALUE }
+
+    fun setArchived(runId: String, on: Boolean) {
+        if (on && runId == storage.activeRunId) { reject("进行中的实验不能归档，请先结束"); return }
+        storage.setArchived(runId, on)
+        libraryVersion++
+        message = if (on) "已归档" else "已取消归档"
+    }
+
+    fun deleteRun(runId: String): Boolean {
+        if (runId == storage.activeRunId) { reject("进行中的实验不能删除，请先结束"); return false }
+        val ok = try { storage.deleteRun(runId) } catch (e: Exception) { reject("删除失败：${e.message}"); return false }
+        // 顺带清掉这次实验之前生成的导出缓存
+        File(ctx.cacheDir, "exports").listFiles { f -> f.name.contains("_${runId.take(8)}.") }?.forEach { it.delete() }
+        if (lastEndedRunId == runId) lastEndedRunId = null
+        libraryVersion++
+        if (ok) message = "已删除" else reject("删除未完成，部分文件可能仍在")
+        return ok
     }
 
     fun loadState(runId: String): RunState? = runs().firstOrNull { it.runId == runId }?.state

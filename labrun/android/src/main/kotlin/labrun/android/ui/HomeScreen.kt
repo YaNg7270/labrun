@@ -98,25 +98,42 @@ fun HomeScreen(
             }
         }
 
-        val runs = remember(repo.libraryVersion) { repo.runs() }
+        val all = remember(repo.libraryVersion) { repo.runs() }
+        val runs = all.filter { !it.archived }
+        val archived = all.filter { it.archived }
         SectionTitle("历史实验（${runs.size}）")
         if (runs.isEmpty()) Text("暂无", style = LabType.body, color = c.muted)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 24.dp)) {
-            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT)
-            runs.forEach { r ->
-                val s = r.state
-                Card(Modifier.clickableRow { if (s?.isEnded == false) onOpenRun() else onOpenDetail(r.runId) }) {
-                    if (s == null) Text("无法读取：${r.error}", color = c.overdue)
-                    else Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(s.protocol.title, style = LabType.body)
-                            Text(fmt.format(Date(s.start.wallMs)) + " · " + r.runId.take(8), style = LabType.caption, color = c.muted)
-                        }
-                        if (s.isEnded) Chip("已结束 ${TimeFormat.elapsed(s.ended!!.tRunMs)}", c.muted) else Chip("进行中", c.primary)
+        RunList(runs, onOpenRun, onOpenDetail)
+        if (archived.isNotEmpty()) {
+            var showArchived by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp).clickableRow { showArchived = !showArchived }.padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("已归档（${archived.size}）", style = LabType.label, color = c.muted, modifier = Modifier.weight(1f))
+                Text(if (showArchived) "收起 ▴" else "展开 ▾", style = LabType.label, color = c.primary)
+            }
+            if (showArchived) RunList(archived, onOpenRun, onOpenDetail)
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun RunList(runs: List<Repository.RunSummary>, onOpenRun: () -> Unit, onOpenDetail: (String) -> Unit) {
+    val c = LocalLab.current
+    val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        runs.forEach { r ->
+            val s = r.state
+            Card(Modifier.clickableRow { if (s?.isEnded == false) onOpenRun() else onOpenDetail(r.runId) }) {
+                if (s == null) Text("无法读取：${r.error}", color = c.overdue)
+                else Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.protocol.title, style = LabType.body)
+                        Text(fmt.format(Date(s.start.wallMs)) + " · " + r.runId.take(8), style = LabType.caption, color = c.muted)
                     }
+                    if (s.isEnded) Chip("已结束 ${TimeFormat.elapsed(s.ended!!.tRunMs)}", c.muted) else Chip("进行中", c.primary)
                 }
             }
         }
     }
 }
-
