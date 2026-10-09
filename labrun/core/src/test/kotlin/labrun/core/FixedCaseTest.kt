@@ -29,7 +29,7 @@ class MemorySink : EventSink {
 
 fun exampleBytes(): ByteArray = File(System.getProperty("labrun.examples"), "演示实验.protocol.json").readBytes()
 
-/** 交接说明「固定案例与预期时间线」与契约 §7 的逐行断言。 */
+/** 固定案例（examples/演示实验.protocol.json）与契约 §7 预期时间线的逐行断言。 */
 class FixedCaseTest {
     private fun d(h: String) = "2026-10-08T$h+08:00"
 
