@@ -40,6 +40,8 @@ data class SamplePoint(
     val voided: List<Measurement> = emptyList(),
 ) {
     val key get() = "${plan.id}#$index"
+    /** 计划只有一个点时不写“第 1 次”。 */
+    val title get() = if (plan.offsetsSeconds.size > 1) "${plan.label} 第 ${index + 1} 次" else plan.label
 }
 
 /** 一条测量及其全部更正历史；取值/时刻属性返回生效值，[body] 永远是原始记录。 */

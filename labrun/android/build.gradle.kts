@@ -15,8 +15,8 @@ android {
         applicationId = "labrun.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.1.1"
     }
 
     // 正式签名：keystore/keystore.properties（不随源码分发，务必备份；丢失后无法发布可覆盖安装的更新）

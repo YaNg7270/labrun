@@ -258,7 +258,7 @@ fun Tabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
             val sel = i == selected
             Box(
                 Modifier.weight(1f).background(if (sel) c.surface else Color.Transparent, RoundedCornerShape(16.dp))
-                    .clickableRow { onSelect(i) }.padding(vertical = 10.dp),
+                    .clickableRow { onSelect(i) }.padding(vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(o, style = LabType.label, color = if (sel) c.primary else c.muted) }
         }

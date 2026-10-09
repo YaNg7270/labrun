@@ -31,7 +31,7 @@ object Reminders {
         if (s.isEnded) return emptyList()
         val fired = s.reminders.map { (r, _) -> Triple(r.kind, r.refId, r.pointIndex) }.toSet()
         val points = s.points.filter { it.status == PointStatus.OPEN }.map { p ->
-            ReminderTarget(ReminderKind.SAMPLE, p.plan.id, p.index, p.plannedTRunMs, "${p.plan.label} 第 ${p.index + 1} 次采样（${s.anchorDef(p.plan.anchorId).label} ${TimeFormat.elapsed(p.offsetS * 1000)}）")
+            ReminderTarget(ReminderKind.SAMPLE, p.plan.id, p.index, p.plannedTRunMs, "${p.title}（${s.anchorDef(p.plan.anchorId).label} ${TimeFormat.elapsed(p.offsetS * 1000)}）")
         }
         val steps = s.steps.filter { it.status == StepStatus.CURRENT || it.status == StepStatus.PENDING }.mapNotNull { st ->
             s.stepNotBeforeTRun(st.def)?.let { ReminderTarget(ReminderKind.STEP, st.def.id, null, it, "可以开始：${st.def.title}") }

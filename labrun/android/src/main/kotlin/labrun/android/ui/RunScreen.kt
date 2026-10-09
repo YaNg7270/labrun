@@ -4,7 +4,17 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import android.os.VibrationEffect
+import android.os.Vibrator
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -103,49 +113,80 @@ fun RunScreen(repo: Repository, modifier: Modifier, onBack: () -> Unit, onEnded:
         }
     }
 
+    // 到点（含逾期）未测的采样，按计划时刻排；顶部常驻提醒用
+    val due = s.points.filter { it.status == PointStatus.OPEN && it.plannedTRunMs <= nowT }.sortedBy { it.plannedTRunMs }
+    DueVibration(due.map { it.key }.toSet())
+
     Column(modifier) {
+        // 顶栏：高度固定，不随起点数量变化（实测起点一多就把步骤挤出屏幕）
         Column(Modifier.padding(horizontal = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("‹ 首页") }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { showEnd = true }) { Text("结束实验", color = c.overdue) }
+                TextButton(onClick = onBack, modifier = Modifier.height(48.dp)) { Text("‹ 首页") }
+                Text(s.protocol.title, style = LabType.label, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+                TextButton(onClick = { showEnd = true }, modifier = Modifier.height(48.dp)) { Text("结束实验", color = c.overdue) }
             }
-            Text(s.protocol.title, style = LabType.label, color = c.muted)
-            Text(TimeFormat.elapsed(nowT), style = LabType.display, color = c.primary)
-            Text("开始于 ${TimeFormat.clock(s.start.wallMs, s.start.tzOffsetS)}", style = LabType.caption, color = c.muted)
-            // 局部计时起点
-            s.anchors.values.filter { it.def.id != s.protocol.runStartAnchorId && !s.isAdhocAnchor(it.def.id) }.forEach { a ->
-                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(a.def.label, style = LabType.label, modifier = Modifier.weight(1f))
-                    val rel = s.relativeTo(a.def.id, nowT)
-                    Text(TimeFormat.elapsed(rel), style = LabType.labelNum, color = if (rel == null) c.muted else c.text)
-                    if (rel == null && a.def.createOn == AnchorTrigger.Manual)
-                        TextButton(onClick = { anchorDialog = a.def.id }) { Text("建立") }
-                    if (rel != null) TextButton(onClick = { anchorFix = a.def.id }) { Text(if (a.isCorrected) "已更正" else "更正", style = LabType.caption) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(TimeFormat.elapsed(nowT), style = LabType.display, color = c.primary)
+                // 只显示最近建立的一个局部起点，单行；全部起点及更正在“时间线”页
+                val latest = s.anchors.values
+                    .filter { it.def.id != s.protocol.runStartAnchorId && !s.isAdhocAnchor(it.def.id) && it.tRunMs != null }
+                    .maxByOrNull { it.tRunMs!! }
+                latest?.let { a ->
+                    Column(Modifier.weight(1f).padding(start = 12.dp), horizontalAlignment = Alignment.End) {
+                        Text(a.def.label, style = LabType.caption, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(TimeFormat.elapsed(s.relativeTo(a.def.id, nowT)), style = LabType.title.copy(fontFeatureSettings = "tnum"), maxLines = 1)
+                    }
                 }
             }
-            if (s.timeUncertain) Banner("本次实验出现过重启或系统时间变化，部分时间为估算", c.uncertain)
-            Spacer(Modifier.height(8.dp))
+            if (s.timeUncertain) Text("出现过重启或系统时间变化，部分时间为估算", style = LabType.caption, color = c.uncertain, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (due.isNotEmpty()) DueAlert(s, due, nowT) { recordPoint = due.first() }
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Tabs(listOf("操作", "采样", "现象", "时间线"), tab) { tab = it }
         }
 
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
             when (tab) {
-                0 -> StepsPanel(repo, s, nowT, onSkip = { showSkip = true }, onPoint = onPoint, onRevert = { revertStep = it }, onRecordRow = { extraPlan = it })
+                0 -> StepsPanel(repo, s, nowT, onSkip = { showSkip = true }, onPoint = onPoint, onRevert = { revertStep = it },
+                    onRecordRow = { extraPlan = it }, onEstablish = { anchorDialog = it })
                 1 -> MeasurementTable(s, nowT, onPoint = onPoint, onMeasurement = { editMeasurement = it }, onExtra = { extraPlan = it },
                     onNewTable = { newTable = true }, onStopTable = { stopTable = it })
                 2 -> ObservationsPanel(repo, s) { editObs = it }
                 else -> {
+                    SectionTitle("计时起点")
+                    s.anchors.values.filter { it.def.id != s.protocol.runStartAnchorId && !s.isAdhocAnchor(it.def.id) }.forEach { a ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(a.def.label, style = LabType.body, modifier = Modifier.weight(1f))
+                            val rel = s.relativeTo(a.def.id, nowT)
+                            Text(TimeFormat.elapsed(rel), style = LabType.labelNum, color = if (rel == null) c.muted else c.text)
+                            if (rel == null && a.def.createOn == AnchorTrigger.Manual)
+                                TextButton(onClick = { anchorDialog = a.def.id }) { Text("建立") }
+                            if (rel != null) TextButton(onClick = { anchorFix = a.def.id }) { Text(if (a.isCorrected) "已更正" else "更正") }
+                        }
+                    }
+                    SectionTitle("时间线")
                     TimelineList(s)
                     SectionTitle("更正记录")
                     CorrectionsPanel(s)
                 }
             }
-            Spacer(Modifier.height(80.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { showObservation = true }, modifier = Modifier.weight(1f).height(52.dp)) { Text("记录现象") }
+        // 底部大按钮：位置固定，戴手套也好按
+        val cur = s.currentStep
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { showObservation = true }, modifier = Modifier.weight(1f).height(64.dp)) { Text("记录现象", style = LabType.title) }
+            if (tab == 0 && cur != null) {
+                val actionId = remember(cur.def.id) { newAction() }
+                // 防误触：上一步刚确认、按钮原位换成下一步时，连点会把下一步也确认掉
+                var armed by remember(cur.def.id) { mutableStateOf(false) }
+                LaunchedEffect(cur.def.id) { delay(DesignTokens.CONFIRM_ARM_MS); armed = true }
+                Button(onClick = { repo.confirmStep(cur.def.id, actionId) }, enabled = armed, modifier = Modifier.weight(1.6f).height(64.dp)) {
+                    Text("确认完成", style = LabType.title)
+                }
+            }
         }
     }
 
@@ -166,7 +207,7 @@ fun RunScreen(repo: Repository, modifier: Modifier, onBack: () -> Unit, onEnded:
 
 @Composable
 private fun StepsPanel(repo: Repository, s: RunState, nowT: Long, onSkip: () -> Unit, onPoint: (SamplePoint) -> Unit, onRevert: (labrun.core.StepState) -> Unit,
-                       onRecordRow: (labrun.core.SamplingPlanDef) -> Unit) {
+                       onRecordRow: (labrun.core.SamplingPlanDef) -> Unit, onEstablish: (String) -> Unit) {
     val c = LocalLab.current
     val cur = s.currentStep
     if (cur == null) {
@@ -176,10 +217,6 @@ private fun StepsPanel(repo: Repository, s: RunState, nowT: Long, onSkip: () -> 
         }
     } else {
         val idx = s.steps.indexOf(cur)
-        val actionId = remember(cur.def.id) { newAction() }
-        // 防误触：上一步刚确认、按钮原位换成下一步时，连点会把下一步也确认掉
-        var armed by remember(cur.def.id) { mutableStateOf(false) }
-        LaunchedEffect(cur.def.id) { delay(DesignTokens.CONFIRM_ARM_MS); armed = true }
         Card(borderColor = c.primary) {
             Text("第 ${idx + 1} / ${s.steps.size} 步", style = LabType.label, color = c.primary)
             Text(cur.def.title, style = LabType.title, modifier = Modifier.padding(vertical = 4.dp))
@@ -194,28 +231,23 @@ private fun StepsPanel(repo: Repository, s: RunState, nowT: Long, onSkip: () -> 
             }
             val overdue = s.points.filter { it.status == PointStatus.OPEN && it.plannedTRunMs + DesignTokens.DUE_WINDOW_MS <= nowT && it.plan.id in cur.def.samplingPlanIds }
             if (overdue.isNotEmpty()) Text("有 ${overdue.size} 个采样逾期未测；确认步骤不会关闭它们。", style = LabType.label, color = c.overdue, modifier = Modifier.padding(top = 8.dp))
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { repo.confirmStep(cur.def.id, actionId) }, enabled = armed, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("确认完成", style = LabType.title) }
-            TextButton(onClick = onSkip) { Text("跳过此步…", color = c.muted) }
+            TextButton(onClick = onSkip, modifier = Modifier.padding(top = 4.dp).height(48.dp)) { Text("跳过此步…", color = c.muted) }
         }
     }
 
-    // 当前需要关注的采样点：到期、逾期，以及下一个
-    val open = s.points.filter { it.status == PointStatus.OPEN }
-    val focus = open.filter { it.plannedTRunMs <= nowT } + open.filter { it.plannedTRunMs > nowT }.take(1)
-    if (focus.isNotEmpty()) {
-        SectionTitle("采样")
-        focus.forEach { p ->
-            val look = pointLook(p, nowT, s)
-            Card(Modifier.padding(bottom = 8.dp).clickableRow { onPoint(p) }, borderColor = look.color) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("${p.plan.label} 第 ${p.index + 1} 次", style = LabType.body)
-                        Text("计划 " + s.moment(p.plannedTRunMs, s.wallAt(p.plannedTRunMs), p.plan.anchorId), style = LabType.caption, color = c.muted)
-                    }
-                    Chip(look.text, look.color)
-                }
-            }
+    // 到点的采样在顶部常驻提醒；这里只预告下一个
+    s.points.filter { it.status == PointStatus.OPEN && it.plannedTRunMs > nowT }.minByOrNull { it.plannedTRunMs }?.let { p ->
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp).clickableRow { onPoint(p) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("下一次测量：${p.title}",
+                style = LabType.body, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("还有 ${TimeFormat.elapsed(p.plannedTRunMs - nowT).drop(1)}", style = LabType.labelNum, color = c.muted)
+        }
+    }
+
+    // 临场建立的起点（如“看到沉淀时”）
+    s.anchors.values.filter { it.tRunMs == null && it.def.createOn == AnchorTrigger.Manual && !s.isAdhocAnchor(it.def.id) }.forEach { a ->
+        OutlinedButton(onClick = { onEstablish(a.def.id) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(56.dp)) {
+            Text("建立计时起点：${a.def.label}", style = LabType.body)
         }
     }
 
@@ -230,11 +262,19 @@ private fun StepsPanel(repo: Repository, s: RunState, nowT: Long, onSkip: () -> 
                     Text(t.created.title, style = LabType.body)
                     Text("已记 $n 行 · 列：" + t.plan.fields.joinToString("、") { it.label }, style = LabType.caption, color = c.muted)
                 }
-                OutlinedButton(onClick = { onRecordRow(t.plan) }) { Text("＋记录一行") }
+                OutlinedButton(onClick = { onRecordRow(t.plan) }, modifier = Modifier.height(56.dp)) { Text("＋记录一行") }
             }
         }
     }
-    SectionTitle("全部步骤（点最近确认的一步可撤销）")
+    // 全部步骤默认收起，整行可点展开
+    var showAll by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp).clickableRow { showAll = !showAll }.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("全部步骤（${s.steps.count { it.status == StepStatus.CONFIRMED || it.status == StepStatus.SKIPPED }}/${s.steps.size}）",
+            style = LabType.label, color = c.muted, modifier = Modifier.weight(1f))
+        Text(if (showAll) "收起 ▴" else "展开 ▾", style = LabType.label, color = c.primary)
+    }
+    if (!showAll) return
+    Text("点最近确认的一步可撤销确认", style = LabType.caption, color = c.muted)
     val lastDone = s.lastDoneStep
     s.steps.forEachIndexed { i, st ->
         val (txt, col) = when (st.status) {
@@ -244,11 +284,51 @@ private fun StepsPanel(repo: Repository, s: RunState, nowT: Long, onSkip: () -> 
             StepStatus.PENDING -> "未开始" to c.muted
             StepStatus.NOT_COMPLETED -> "未完成" to c.missed
         }
-        Row(Modifier.fillMaxWidth().then(if (st == lastDone) Modifier.clickableRow { onRevert(st) } else Modifier).padding(vertical = 6.dp),
+        Row(Modifier.fillMaxWidth().then(if (st == lastDone) Modifier.clickableRow { onRevert(st) } else Modifier).padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("${i + 1}. ${st.def.title}", style = LabType.body, modifier = Modifier.weight(1f))
             if (st.reverts.isNotEmpty()) Chip("撤销过 ${st.reverts.size} 次", c.uncertain, Modifier.padding(end = 4.dp))
             Chip(txt, col)
+        }
+    }
+}
+
+/** 顶部常驻的“该测量了”提醒：整块可点，颜色闪烁；任何页签都看得到。 */
+@Composable
+private fun DueAlert(s: RunState, due: List<SamplePoint>, nowT: Long, onOpen: () -> Unit) {
+    val c = LocalLab.current
+    val first = due.first()
+    val overdue = nowT >= first.plannedTRunMs + DesignTokens.DUE_WINDOW_MS
+    val base = if (overdue) c.overdue else c.due
+    val pulse by rememberInfiniteTransition(label = "due").animateColor(
+        base, base.copy(alpha = 0.55f), infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "due",
+    )
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+            .background(pulse, RoundedCornerShape(12.dp)).clickableRow(onOpen)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(if (overdue) "测量已逾期" else "该测量了", style = LabType.label, color = c.onPrimary)
+            Text(first.title,
+                style = LabType.title, color = c.onPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (due.size > 1) Text("另有 ${due.size - 1} 个待测", style = LabType.caption, color = c.onPrimary)
+        }
+        Text("录入 ›", style = LabType.title, color = c.onPrimary)
+    }
+}
+
+/** 有新的采样到点时振动一次（App 在前台时；后台由通知提醒）。 */
+@Composable
+private fun DueVibration(keys: Set<String>) {
+    val ctx = LocalContext.current
+    var seen by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(keys) {
+        val prev = seen
+        seen = keys
+        if (prev != null && (keys - prev).isNotEmpty()) runCatching {
+            ctx.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 300, 150, 300), -1))
         }
     }
 }
@@ -280,14 +360,14 @@ private fun RecordDialog(repo: Repository, s: RunState, plan: labrun.core.Sampli
     var confirmMissed by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Column { Text(if (p == null) "${plan.label}：计划外测量" else "${plan.label} 第 ${p.index + 1} 次"); RejectionText(repo) } },
+        title = { Column { Text(if (p == null) "${plan.label}：计划外测量" else p.title); RejectionText(repo) } },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (p != null) Text("计划 " + s.moment(p.plannedTRunMs, s.wallAt(p.plannedTRunMs), plan.anchorId), style = LabType.caption, color = c.muted)
                 else Text("不占用计划采样点，单独列在测量表“计划外测量”中；时间以“${s.anchorDef(plan.anchorId).label}”为相对起点。", style = LabType.caption, color = c.muted)
                 plan.fields.forEach { f ->
                     OutlinedTextField(values.value[f.id].orEmpty(), { v -> values.value = values.value + (f.id to v) },
-                        label = { Text(f.label + (f.unit?.let { "（$it）" } ?: "")) }, singleLine = true,
+                        label = { Text(f.label + (f.unit?.let { "（$it）" } ?: "")) }, singleLine = true, textStyle = LabType.title,
                         keyboardOptions = KeyboardOptions(keyboardType = when (f.type) {
                             FieldType.DECIMAL -> KeyboardType.Decimal; FieldType.INTEGER -> KeyboardType.Number; FieldType.TEXT -> KeyboardType.Text }),
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
@@ -300,15 +380,15 @@ private fun RecordDialog(repo: Repository, s: RunState, plan: labrun.core.Sampli
             Button(onClick = {
                 val at = if (useNow) null else parseClock(clockText) ?: run { repo.reject("时刻格式应为 时:分:秒"); return@Button }
                 if (repo.record(plan.id, p?.index, values.value, at, actionId)) onClose()
-            }) { Text("保存") }
+            }, modifier = Modifier.height(56.dp)) { Text("保存", style = LabType.title) }
         },
         dismissButton = {
             Row {
                 if (p != null) TextButton(onClick = {
                     if (!confirmMissed) confirmMissed = true
                     else if (repo.markMissed(plan.id, p.index, "manual", actionId + ":missed")) onClose()
-                }) { Text("标记漏测", color = c.missed) }
-                TextButton(onClick = onClose) { Text("取消") }
+                }, modifier = Modifier.height(56.dp)) { Text("标记漏测", color = c.missed) }
+                TextButton(onClick = onClose, modifier = Modifier.height(56.dp)) { Text("取消") }
             }
         },
     )
@@ -380,7 +460,7 @@ private fun EndDialog(repo: Repository, s: RunState, nowT: Long, onDone: (Boolea
                 Text("结束于 ${TimeFormat.elapsed(nowT)}。结束后不能再新增记录或确认步骤；录错的数值、现象和起点时刻仍可更正（原值保留）。", style = LabType.body)
                 if (open.isNotEmpty()) {
                     Text("以下 ${open.size} 个采样将记为漏测（值为空）：", style = LabType.label, color = c.overdue, modifier = Modifier.padding(top = 12.dp))
-                    open.forEach { p -> Text("· ${p.plan.label} 第 ${p.index + 1} 次（计划 ${TimeFormat.elapsed(p.plannedTRunMs)}）", style = LabType.caption) }
+                    open.forEach { p -> Text("· ${p.title}（计划 ${TimeFormat.elapsed(p.plannedTRunMs)}）", style = LabType.caption) }
                 }
                 if (unfinished.isNotEmpty()) {
                     Text("以下 ${unfinished.size} 个步骤将记为未完成：", style = LabType.label, color = c.missed, modifier = Modifier.padding(top = 12.dp))

@@ -253,7 +253,7 @@ object ProtocolParser {
                 val fid = id(fo, "id", fp)
                 val fl = str(fo, "label", fp, true)
                 val ft = str(fo, "type", fp, true)?.let { t -> FieldType.entries.firstOrNull { it.wire == t } ?: run { err("E_VALUE", "$fp.type", "应为 decimal / integer / text"); null } }
-                val unit = str(fo, "unit", fp, false, max = 32)
+                val unit = str(fo, "unit", fp, false, max = 32)?.takeIf { it.isNotBlank() }
                 if (fid != null && fl != null && ft != null) FieldDef(fid, fl, ft, unit) else null
             }
             fields?.groupBy { it.id }?.filter { it.value.size > 1 }?.keys?.forEach { err("E_DUP_ID", "$path.fields", "字段 ID “$it” 重复") }
