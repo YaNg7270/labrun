@@ -154,7 +154,7 @@ private fun snapshot(args: List<String>) {
     println("快照已写入 ${out.absolutePath}")
 }
 
-const val APP_VERSION = "desktop-1.1.0"
+const val APP_VERSION = "desktop-1.1.1"
 
 val LocalForceDark = staticCompositionLocalOf<Boolean?> { null }
 

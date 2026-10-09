@@ -27,7 +27,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "LabRun"
-            packageVersion = "1.1.0"
+            packageVersion = "1.1.1"
             description = "LabRun desktop (experiment records)"
             vendor = "LabRun"
             windows {
